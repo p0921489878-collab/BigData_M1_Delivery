@@ -1,0 +1,69 @@
+# ==================== 環境與密鑰 ====================
+.env
+*.pem
+*.key
+secrets/
+
+# ==================== DuckDB 數據庫 ====================
+*.db
+*.db.wal
+*.db.tmp
+*.duckdb
+analytics.db
+
+# ==================== 大文件數據 ====================
+*.parquet
+*.csv
+!requirements*.txt
+*.jsonl
+streaming_logs.jsonl
+scored_events.jsonl
+dead_letter.jsonl
+*.xlsx
+*.feather
+
+# ==================== 模型檔案 ====================
+*.pkl
+*.h5
+*.pb
+*.onnx
+
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+test_env/
+*.egg-info
+
+# ==================== IDE ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ==================== OS ====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==================== 日誌與輸出 ====================
+*.log
+output/
+!output/.gitkeep
+
+# ==================== Jupyter ====================
+.ipynb_checkpoints/
+*.ipynb
+
+# ==================== 暫存 ====================
+tmp/
+temp/
+*.tmp

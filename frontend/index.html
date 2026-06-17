@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大数据分析看板 - 产品级交互系统(任务1-4完备版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+        .search-box {
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            padding: 8px 12px;
+            width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background-color: #0056b3; }
+        
+        /* 🌟 调整容器支持并排三个图表，自动换行响应式 */
+        .chart-container {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            flex: 1;
+            min-width: 320px; /* 保证在小屏幕上优雅换行 */
+        }
+        .chart {
+            width: 100%;
+            height: 380px;
+        }
+        .review-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .review-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .review-item:last-child { border-bottom: none; }
+        .badge {
+            display: inline-block;
+            padding: 3px 7px;
+            font-size: 12px;
+            border-radius: 3px;
+            margin-right: 5px;
+        }
+        .badge-pos { background-color: #d4edda; color: #155724; }
+        .badge-neg { background-color: #f8d7da; color: #721c24; }
+        .status-bar {
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>📊 电商评论多维度交互探索看板 (功能全集成版)</h2>
+        <div class="status-bar" id="filter-status">当前筛选：无</div>
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="输入关键字或正则表达式, 或点击下方词云...">
+            <button id="reset-btn">重置筛选</button>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <div class="card">
+            <h3>📦 各品类样本分布 (静态总览)</h3>
+            <div id="category-chart" class="chart"></div>
+        </div>
+        
+        <div class="card">
+            <h3>✨ 核心高频词云气泡图 (点击追加检索 - 选项C)</h3>
+            <div id="wordcloud-chart" class="chart"></div>
+        </div>
+        
+        <div class="card">
+            <h3>🎭 品类动态情感分析 (堆叠柱状图)</h3>
+            <div id="sentiment-chart" class="chart"></div>
+        </div>
+    </div>
+
+    <div class="review-section">
+        <h3>💬 实时动态评论明细 (最多展示 20 条)</h3>
+        <div id="review-list">
+            <p style="color: #999; text-align: center;">数据加载中...</p>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 1. 统一状态机定义 (任务1核心) ====================
+        const dashboardState = {
+            category: null,     // 当前选中的品类名称
+            sentiment: "",      // 当前选中的情感 ("正面" / "负面")
+            searchQuery: ""     // 当前输入的正则检索关键词
+        };
+
+        // 初始化所有 ECharts 实例 (包含新增的词云气泡图)
+        const categoryChart = echarts.init(document.getElementById('category-chart'));
+        const wordCloudChart = echarts.init(document.getElementById('wordcloud-chart'));
+        const sentimentChart = echarts.init(document.getElementById('sentiment-chart'));
+
+        // ==================== 2. 核心数据驱动与非合并重绘 (任务1, 3, 4核心) ====================
+        function fetchFilteredData() {
+            // 更新状态栏文字提示
+            const statusText = `品类: ${dashboardState.category || '全部'} | 情感: ${dashboardState.sentiment || '全部'} | 检索: ${dashboardState.searchQuery || '无'}`;
+            document.getElementById('filter-status').innerText = `当前筛选：${statusText}`;
+
+            // 构建统一的 URL 编码参数
+            const encodedCat = encodeURIComponent(dashboardState.category || '');
+            const encodedSent = encodeURIComponent(dashboardState.sentiment);
+            const encodedQuery = encodeURIComponent(dashboardState.searchQuery);
+
+            const statsUrl = `/api/sentiment-overview?cat=${encodedCat}`;
+            const reviewsUrl = `/api/reviews?cat=${encodedCat}&sentiment=${encodedSent}&query=${encodedQuery}`;
+            // 🌟 选项C异步词云接口URL
+            const keywordsUrl = `/api/keywords?cat=${encodedCat}&sentiment=${encodedSent}&query=${encodedQuery}`;
+
+            // 并发异步加载全看板关联状态
+            Promise.all([
+                fetch(statsUrl).then(res => res.json()),
+                fetch(reviewsUrl).then(res => res.json()),
+                fetch(keywordsUrl).then(res => res.json()) // 🌟 异步拉取词云
+            ]).then(([statsRes, reviewsRes, keywordsData]) => {
+                
+                // --- A. 渲染或更新情感分析图表 ---
+                if (statsRes.status === "ok") {
+                    renderSentimentChart(statsRes.data);
+                }
+
+                // --- B. 渲染或更新评论列表 DOM ---
+                renderReviewList(reviewsRes.data, reviewsRes.total);
+
+                // --- C. 🌟 异步自适应重绘原生词云气泡图 ---
+                renderNativeWordCloud(keywordsData);
+
+            }).catch(err => console.error("看板数据联动请求失败:", err));
+        }
+
+        // 🌟 选项C核心：使用原生散点图自适应排版的黄金螺旋气泡词云
+        function renderNativeWordCloud(keywords) {
+            if (!keywords || keywords.length === 0) {
+                wordCloudChart.setOption({
+                    title: { text: '当前筛选条件下无高频词汇', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } },
+                    series: []
+                }, true);
+                return;
+            }
+
+            const maxCount = Math.max(...keywords.map(k => k.count));
+            const colorPalette = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
+
+            // 黄金分布算法，确保每次异步重绘时排列自适应且不重合
+            const seriesData = keywords.map((item, index) => {
+                const theta = index * 2.39996; // 黄金比例发散角
+                const r = Math.sqrt(index + 1) * 11;
+                const x = 50 + r * Math.cos(theta);
+                const y = 50 + r * Math.sin(theta);
+
+                // 词频映射气泡大小与标签大小
+                const bubbleSize = maxCount > 0 ? 35 + (item.count / maxCount) * 55 : 50;
+                const textFontSize = maxCount > 0 ? Math.max(11, Math.min(17, 11 + (item.count / maxCount) * 7)) : 13;
+
+                return {
+                    name: item.word,
+                    value: [x, y, item.count],
+                    symbolSize: bubbleSize,
+                    itemStyle: {
+                        color: colorPalette[index % colorPalette.length],
+                        opacity: 0.9,
+                        shadowBlur: 5,
+                        shadowColor: 'rgba(0,0,0,0.1)'
+                    },
+                    label: {
+                        show: true,
+                        formatter: item.word,
+                        fontSize: textFontSize,
+                        color: '#fff',
+                        fontWeight: 'bold'
+                    }
+                };
+            });
+
+            const option = {
+                tooltip: { formatter: params => `词汇: <b>${params.name}</b><br/>频次: <b>${params.value[2]}</b> 次` },
+                xAxis: { show: false, min: 0, max: 100 },
+                yAxis: { show: false, min: 0, max: 100 },
+                series: [{
+                    type: 'scatter',
+                    data: seriesData,
+                    animationType: 'scale'
+                }]
+            };
+            // 任務4防禦：非合併重繪
+            wordCloudChart.setOption(option, true);
+        }
+
+        // 渲染动态情感图表
+        function renderSentimentChart(data) {
+            const categories = data.map(item => item.category);
+            const posData = data.map(item => item.正面);
+            const negData = data.map(item => item.负面);
+
+            const option = {
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                legend: { data: ['正面', '负面'] },
+                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                xAxis: { type: 'value' },
+                yAxis: { type: 'category', data: categories },
+                series: [
+                    { name: '正面', type: 'bar', stack: 'total', color: '#28a745', data: posData },
+                    { name: '负面', type: 'bar', stack: 'total', color: '#dc3545', data: negData }
+                ]
+            };
+            sentimentChart.setOption(option, true);
+        }
+
+        // 渲染评论列表明细
+        function renderReviewList(records, total) {
+            const listContainer = document.getElementById('review-list');
+            if (!records || records.length === 0) {
+                listContainer.innerHTML = `<p style="color: #999; text-align: center;">匹配不到任何评论数据 (总数: 0 条)</p>`;
+                return;
+            }
+
+            let html = `<p style="font-size:12px; color:#666; margin-bottom:10px;">📊 根据当前条件筛选出 <b>${total}</b> 条结果，下方显示前 20 条：</p>`;
+            records.forEach(item => {
+                const text = item.review || item.text || "";
+                const cat = item.cat || item.category || "未知";
+                const sent = item.sentiment || "正面";
+                const badgeClass = sent === "正面" ? "badge-pos" : "badge-neg";
+
+                html += `
+                    <div class="review-item">
+                        <span class="badge" style="background:#e9ecef; color:#495057;">${cat}</span>
+                        <span class="badge ${badgeClass}">${sent}</span>
+                        <span>${text}</span>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = html;
+        }
+
+        // ==================== 3. 初始化静态品类图表 ====================
+        function initStaticCategoryChart() {
+            fetch('/api/category-distribution')
+                .then(res => res.json())
+                .then(res => {
+                    const option = {
+                        tooltip: { trigger: 'axis' },
+                        xAxis: { type: 'category', data: res.categories, axisLabel: { rotate: 30 } },
+                        yAxis: { type: 'value' },
+                        series: [{ data: res.counts, type: 'bar', color: '#007bff' }]
+                    };
+                    categoryChart.setOption(option);
+                });
+        }
+
+        // ==================== 4. 监听图表事件实现双向联动 (任务1, 3, 4核心) ====================
+        
+        // 品类柱状图点击事件 ➔ 过滤情感图、词云与列表
+        categoryChart.off('click');
+        categoryChart.on('click', function (params) {
+            if (params.name) {
+                dashboardState.category = (dashboardState.category === params.name) ? null : params.name;
+                dashboardState.sentiment = ""; 
+                fetchFilteredData();
+            }
+        });
+
+        // 情感图表色块点击事件 ➔ 进一步锁定情感、词云与列表
+        sentimentChart.off('click');
+        sentimentChart.on('click', function (params) {
+            if (params.seriesName) {
+                dashboardState.sentiment = (dashboardState.sentiment === params.seriesName) ? "" : params.seriesName;
+                fetchFilteredData();
+            }
+        });
+
+        // 🌟 选项C核心：点击词云气泡词，智能使用正则管道符 `|` 追加到搜索框触发联动刷新
+        wordCloudChart.off('click');
+        wordCloudChart.on('click', function (params) {
+            if (params.data && params.name) {
+                const searchInput = document.getElementById('search-input');
+                let currentInput = searchInput.value.trim();
+                
+                if (currentInput) {
+                    // 如果原本已有内容且不重复，以正则管道符 | 追加
+                    if (!currentInput.includes(params.name)) {
+                        dashboardState.searchQuery = `${currentInput}|${params.name}`;
+                    }
+                } else {
+                    dashboardState.searchQuery = params.name;
+                }
+                
+                searchInput.value = dashboardState.searchQuery;
+                fetchFilteredData(); // 发送请求刷新全看板
+            }
+        });
+
+        // ==================== 5. 高阶输入防抖函数 (任务2核心) ====================
+        function debounce(func, delay) {
+            let timer = null;
+            return function (...args) {
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(() => {
+                    func.apply(this, args);
+                }, delay);
+            };
+        }
+
+        const searchInput = document.getElementById('search-input');
+        searchInput.addEventListener('input', debounce(function (e) {
+            dashboardState.searchQuery = e.target.value;
+            fetchFilteredData(); 
+        }, 400));
+
+        // 重置按钮事件
+        document.getElementById('reset-btn').addEventListener('click', function() {
+            dashboardState.category = null;
+            dashboardState.sentiment = "";
+            dashboardState.searchQuery = "";
+            searchInput.value = "";
+            fetchFilteredData();
+        });
+
+        // ==================== 6. 页面启动初始化 ====================
+        initStaticCategoryChart(); 
+        fetchFilteredData();       
+        
+        // 监听视窗缩放，保持三个图表同时自适应
+        window.addEventListener('resize', () => {
+            categoryChart.resize();
+            wordCloudChart.resize();
+            sentimentChart.resize();
+        });
+    </script>
+</body>
+</html>
